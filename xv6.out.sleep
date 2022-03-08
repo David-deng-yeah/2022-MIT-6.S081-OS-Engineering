@@ -1,0 +1,11 @@
+
+xv6 kernel is booting
+
+hart 2 starting
+hart 1 starting
+init: starting sh
+$ sleep 10
+exec sleep failed
+$ echo FAIL
+FAIL
+$ qemu-system-riscv64: terminating on signal 15 from pid 21362 (make)
