@@ -5,6 +5,40 @@
 #include "memlayout.h"
 #include "spinlock.h"
 #include "proc.h"
+#include "sysinfo.h"
+
+//implement of sys_trace
+uint64
+sys_trace(void)
+{
+  // store the mask argument in the proc struct
+  // to enable tracing for the current process 
+  // and its children
+  int mask;
+  argint(0, &mask);
+  // store the trace mask in the proc structure
+  myproc()->trace_mask = mask;
+  return 0; //success
+}
+
+// implement of sysinfo
+uint64
+sys_sysinfo(void)
+{
+  // get a address of user-level
+  uint64 addr;
+  argaddr(0, &addr);
+
+  struct sysinfo info;
+  info.freemem = freemem();
+  info.nproc = numprocs();
+  // ensure that info points to valid user space memory
+  // copy &info to addr, so user can use it
+  if(copyout(myproc()->pagetable, addr, (char *)&info, sizeof(info)) < 0){
+    return -1; 
+  } 
+  return 0; // success
+}
 
 uint64
 sys_exit(void)

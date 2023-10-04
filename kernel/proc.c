@@ -20,6 +20,29 @@ static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
 
+// function to count activate process
+// can look allocproc
+uint64 numprocs(void) {
+  struct proc *p;
+  uint64 cnt = 0;
+  for(p = proc; p < &proc[NPROC]; p++){
+    if(p->state != UNUSED){
+      cnt++;
+    }
+  }
+  // only need to read, no need to write, 
+  // so no need to lock
+  // for(p = proc; p < &proc[NPROC]; p++) {
+  //   acquire(&p->lock);
+  //   if(p->state != UNUSED) {
+  //     cnt++;
+  //   } else {
+  //     release(&p->lock);
+  //   }
+  // }
+  return cnt;
+}
+
 // helps ensure that wakeups of wait()ing
 // parents are not lost. helps obey the
 // memory model when using p->parent.
@@ -145,6 +168,8 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+
+  p->trace_mask = 0;// setting a default zero in case of rubbish init data
 
   return p;
 }
@@ -281,7 +306,7 @@ fork(void)
 {
   int i, pid;
   struct proc *np;
-  struct proc *p = myproc();
+  struct proc *p = myproc();// parent process
 
   // Allocate process.
   if((np = allocproc()) == 0){
@@ -289,12 +314,16 @@ fork(void)
   }
 
   // Copy user memory from parent to child.
+  // copy both pagetable and physical memory
   if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;
   }
   np->sz = p->sz;
+
+  // create the child process
+  np->trace_mask = p->trace_mask;
 
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);

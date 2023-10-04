@@ -23,6 +23,25 @@ struct {
   struct run *freelist;
 } kmem;
 
+uint64
+freemem(void)
+{
+  uint64 total_mem = 0;
+  struct run *r;
+  acquire(&kmem.lock);
+  r = kmem.freelist;
+  while(r){
+    total_mem += PGSIZE;
+    r = r->next;
+  }
+  release(&kmem.lock);
+  return total_mem;
+
+  // PHYSTOP is the top of physical memory
+  // end is the end of kernel's data
+  // return (uint64)PHYSTOP - (uint64)end;
+}
+
 void
 kinit()
 {
