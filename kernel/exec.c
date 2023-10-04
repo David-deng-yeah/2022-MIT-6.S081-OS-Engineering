@@ -128,6 +128,13 @@ exec(char *path, char **argv)
   p->trapframe->sp = sp; // initial stack pointer
   proc_freepagetable(oldpagetable, oldsz);
 
+  // visualize RISC-V pagetable
+  if(p->pid == 1){
+    // print the first line of pagetable
+    printf("page table %p\n", pagetable);
+    vmprint(p->pagetable, 1);
+  }
+
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:

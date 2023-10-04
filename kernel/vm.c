@@ -15,6 +15,34 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+// visualize pagetable
+void vmprint(pagetable_t pagetable, int depth)
+{
+  // look kernel/vm.c freewalk()
+  // there are 2^9 = 512 PTEs in a page table.
+  // @leaf entry refers to an entry in the page table
+  // that directly maps to a page of physical memory
+  for(int i = 0; i < 512; i++){
+    pte_t pte = pagetable[i];
+    if(pte & PTE_V){
+      for(int d=0; d<depth; d++){
+        printf(" ..");
+      }
+      // this PTE is valid
+      // PTE2PA is a macros that extract PA from PTE
+      // in a real riscv system, address is 64bit = 8bytes = 2int
+      // and right shift 10bits and then left shift 12 bts can
+      // get physical address
+      printf("%d: pte %p pa %p\n", i, pte, PTE2PA(pte));
+      if((pte & (PTE_R|PTE_W|PTE_X)) == 0){
+        // this pte points to a lower-level pagetable
+        uint64 child = PTE2PA(pte);
+        vmprint((pagetable_t)child, depth+1);// recrusively print the child-pagetable
+      }
+    }
+  }
+}
+
 // Make a direct-map page table for the kernel.
 pagetable_t
 kvmmake(void)
@@ -89,8 +117,8 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
     panic("walk");
 
   for(int level = 2; level > 0; level--) {
-    pte_t *pte = &pagetable[PX(level, va)];
-    if(*pte & PTE_V) {
+    pte_t *pte = &pagetable[PX(level, va)];// pagetable entry index
+    if(*pte & PTE_V) {// check if pte is valid
       pagetable = (pagetable_t)PTE2PA(*pte);
     } else {
       if(!alloc || (pagetable = (pde_t*)kalloc()) == 0)

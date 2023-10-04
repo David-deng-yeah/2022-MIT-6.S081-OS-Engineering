@@ -16,6 +16,7 @@ int nextpid = 1;
 struct spinlock pid_lock;
 
 extern void forkret(void);
+//extern uint64 pgaccess(void*, int, void*);
 static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
@@ -26,6 +27,32 @@ extern char trampoline[]; // trampoline.S
 // must be acquired before any p->lock.
 struct spinlock wait_lock;
 
+// /*
+// * @ buf: the user's provided buffer's pointer
+// * @ num: number of page that we need to probe
+// * @ userspace: the user-level's destination that received the bitmask
+// */
+// uint64 pgaccess(void* buf, int num, void* userspace)
+// {
+//   struct proc *p = myproc();
+//   if(p == 0){
+//     return 1;
+//   }
+//   pagetable_t pagetable = p->pagetable;
+//   int bitmask = 0;
+//   for(int i=0; i<num; i++){
+//     pte_t *pte;
+//     // find the i-th page in the pagetable, return the corresponding pte
+//     // 0 indicate not alloc the unmapped page
+//     pte = walk(pagetable, (uint64)buf+(uint64)PGSIZE*i, 0);
+//     if(pte != 0 && (*pte & PTE_A)){
+//       bitmask |= 1 << i;
+//       *pte ^= PTE_A; // clear PTE_A
+//     }
+//   }
+//   return copyout(pagetable, (uint64)userspace, (char*)&bitmask, sizeof(int));
+// }
+
 // Allocate a page for each process's kernel stack.
 // Map it high in memory, followed by an invalid
 // guard page.
@@ -35,6 +62,7 @@ proc_mapstacks(pagetable_t kpgtbl)
   struct proc *p;
   
   for(p = proc; p < &proc[NPROC]; p++) {
+    // kalloc() get a 4kb page from the freelist and return the pointer
     char *pa = kalloc();
     if(pa == 0)
       panic("kalloc");
@@ -132,6 +160,21 @@ found:
     return 0;
   }
 
+  // Allocate a usyscall page
+  if((p->usyscall = (struct usyscall *)kalloc()) == 0){
+    /*
+    * trapframe doesn't need to be explicity freed because it's
+    * part of the kernel heap, and the kernel heap is automatically
+    * reclaimed when the process exits.
+    * 
+    * usyscall needs to be explicity freed because it's part of
+    * the user address space, and you want to release
+    */
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
   // An empty user page table.
   p->pagetable = proc_pagetable(p);
   if(p->pagetable == 0){
@@ -145,6 +188,8 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+  // initialize pid
+  p->usyscall->pid = p->pid;
 
   return p;
 }
@@ -158,6 +203,12 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+
+  // free usyscall page
+  if(p->usyscall)
+    kfree((void*)p->usyscall);
+  p->usyscall = 0;
+
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
@@ -173,6 +224,7 @@ freeproc(struct proc *p)
 
 // Create a user page table for a given process, with no user memory,
 // but with trampoline and trapframe pages.
+// and with usyscall page
 pagetable_t
 proc_pagetable(struct proc *p)
 {
@@ -201,6 +253,21 @@ proc_pagetable(struct proc *p)
     uvmfree(pagetable, 0);
     return 0;
   }
+  // since it's necessary for user-level process to use the 
+  // pagetable-hardware to access the physical memory
+  // so we create a pte in the pagetable from p->usyscall
+  // to USYCALL
+
+  // map the usyscall page, since usyscall is read-only, so PTE_R | PTE_U
+  // if mapages got error, we should uvm trappoline and trapframe, this is 
+  // like error-handling
+  if(mappages(pagetable, USYSCALL, PGSIZE,
+              (uint64)(p->usyscall), PTE_R | PTE_U) < 0){
+    uvmunmap(pagetable, TRAMPOLINE, 1, 0);
+    uvmunmap(pagetable, TRAPFRAME, 1, 0);
+    uvmfree(pagetable, 0);
+    return 0;
+  }
 
   return pagetable;
 }
@@ -212,6 +279,8 @@ proc_freepagetable(pagetable_t pagetable, uint64 sz)
 {
   uvmunmap(pagetable, TRAMPOLINE, 1, 0);
   uvmunmap(pagetable, TRAPFRAME, 1, 0);
+  // freewalk panic!
+  uvmunmap(pagetable, USYSCALL, 1, 0);
   uvmfree(pagetable, sz);
 }
 
