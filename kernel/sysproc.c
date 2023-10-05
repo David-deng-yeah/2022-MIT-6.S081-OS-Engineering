@@ -6,7 +6,7 @@
 #include "spinlock.h"
 #include "proc.h"
 
-/* 
+/*
   * void(*handler)() is a function pointer declaration
   * void: this indicate that the function doesn't return any value
   * (*)(): this part specifies that `handler` is a pointer to a function
@@ -14,7 +14,7 @@
   * so, void(*handler)() is a declartion for a function pointer that can point to function
   * with any arugument list or no argument
   */
-uint64 
+uint64
 sys_sigalarm(void)
 {
   int ticks;

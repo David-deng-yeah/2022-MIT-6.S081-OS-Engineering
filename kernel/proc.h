@@ -106,9 +106,17 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
-  int alarm_ticks;             // Alarm interval in ticks 
+  // used for trap-lab
+  int alarm_ticks;             // Alarm interval in ticks
   // void(*alarm_handler)();     // Pointer to the alarm handler function
-  uint64 alarm_handler;     // Pointer to the alarm handler function
+  uint64 alarm_handler;        // Pointer to the alarm handler function
   int alarm_ticks_passed;      // Counter to keep track of ticks passed
-  int have_return;
+  /*
+   * have_return is set to prevent "reentrant alarm handler"
+   * a reentrant alarm handler can be interrupted and called again before
+   * the previous invocation of itself.
+   * it will cause three problem: concurrent execution, nested calls and
+   * resource conflicts
+   * */
+  int have_return;             // used to prevent re-entrant calls to the handler
 };

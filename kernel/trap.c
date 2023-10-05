@@ -58,10 +58,10 @@ usertrap(void)
   w_stvec((uint64)kernelvec);
 
   struct proc *p = myproc();
-  
+
   // save user program counter.
   p->trapframe->epc = r_sepc();
-  
+
   if(r_scause() == 8){
     // system call
 
@@ -93,11 +93,20 @@ usertrap(void)
     // manipulate a process's alarm ticks
     // handle time interrupt
     // check and invoke the alarm function if necessary
-    
+
     // quote: Only invoke the alarm function if the process has a timer outstanding
-    if(p->alarm_ticks && p->have_return){
+    // if(p->alarm_ticks && p->have_return){
+    if(p->alarm_ticks){
       if (++p->alarm_ticks_passed == 2) {
+        // trapframe contains all registers, so before jumpping to the 
+        // interrupt, process should save p->trapframe
+        // and the trapframe will be restored in the sigreturn()
         p->trapframe_backup = *p->trapframe;
+        /*
+         * p->trapframe->epc is a register pointing to the exception
+         * program counter, which is used to store the program counter
+         * at the time of an exception or trap.
+         */
         // it will make cpu jmp to the handler function
         p->trapframe->epc = p->alarm_handler;
         p->alarm_ticks_passed = 0;
@@ -118,10 +127,10 @@ usertrap(void)
     //       // save trapframe to trapframe_backup
     //       /*
     //       * memmove is standard c library function that is used to
-    //       * copy a block of memory from a source address to a 
+    //       * copy a block of memory from a source address to a
     //       * destination address
-    //       * 
-    //       * memmove is similar to memcpy, but memove can handle region move with 
+    //       *
+    //       * memmove is similar to memcpy, but memove can handle region move with
     //       * overlap problem.
     //       */
     //       memmove(p->trapframe_backup, p->trapframe, sizeof(struct trapframe));
@@ -161,7 +170,7 @@ usertrapret(void)
 
   // set up the registers that trampoline.S's sret will use
   // to get to user space.
-  
+
   // set S Previous Privilege mode to User.
   unsigned long x = r_sstatus();
   x &= ~SSTATUS_SPP; // clear SPP to 0 for user mode
@@ -174,7 +183,7 @@ usertrapret(void)
   // tell trampoline.S the user page table to switch to.
   uint64 satp = MAKE_SATP(p->pagetable);
 
-  // jump to userret in trampoline.S at the top of memory, which 
+  // jump to userret in trampoline.S at the top of memory, which
   // switches to the user page table, restores user registers,
   // and switches to user mode with sret.
   uint64 trampoline_userret = TRAMPOLINE + (userret - trampoline);
@@ -183,14 +192,14 @@ usertrapret(void)
 
 // interrupts and exceptions from kernel code go here via kernelvec,
 // on whatever the current kernel stack is.
-void 
+void
 kerneltrap()
 {
   int which_dev = 0;
   uint64 sepc = r_sepc();
   uint64 sstatus = r_sstatus();
   uint64 scause = r_scause();
-  
+
   if((sstatus & SSTATUS_SPP) == 0)
     panic("kerneltrap: not from supervisor mode");
   if(intr_get() != 0)
@@ -260,7 +269,7 @@ devintr()
     if(cpuid() == 0){
       clockintr();
     }
-    
+
     // acknowledge the software interrupt by clearing
     // the SSIP bit in sip.
     w_sip(r_sip() & ~2);
