@@ -1,11 +1,3 @@
-//
-// test program for the alarm lab.
-// you can modify this file for testing,
-// but please make sure your kernel
-// modifications pass the original
-// versions of these tests.
-//
-
 #include "kernel/param.h"
 #include "kernel/types.h"
 #include "kernel/stat.h"
@@ -30,6 +22,11 @@ main(int argc, char *argv[])
   exit(0);
 }
 
+/*
+* the volatile keyword is used to inform the compiler 
+* that the variable can be changed at any time, even if
+* it appears that nothing in the program has modified it
+*/
 volatile static int count;
 
 void

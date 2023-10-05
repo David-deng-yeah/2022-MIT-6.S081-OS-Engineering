@@ -1,0 +1,30 @@
+# questions
+* Which registers contain arguments to functions? For example, which register holds 13 in main's call to printf?
+    * In RISC-V calling conventions, function arguments are passed in registers a0, a1, a2, a3, etc. In the case of the call to printf in main, the value 13 is passed as an argument, so it will be in register a2.
+
+* Where is the call to function f in the assembly code for main? Where is the call to g? (Hint: the compiler may inline functions.)
+    * The call to function f in the assembly code for main is at address 24. It's done using a jalr (jump and link register) instruction to a target address calculated as an offset from the ra (return address) register.
+    * The call to function g is also inlined within function f. You can see it at address 14, again using a jalr instruction to a target address calculated from the a0 register.
+
+* At what address is the function printf located?
+    * The address of the function printf is not explicitly mentioned in the assembly code, but it is indirectly called through the jalr instruction at address 30. The target address is calculated using the auipc and addi instructions.
+
+* What value is in the register ra just after the jalr to printf in main?
+    * The value in the register ra just after the jalr to printf in main is the address of the instruction immediately following the jalr instruction. In this case, it would be address 38, which is the start of the exit(0) code.
+
+* Run the provided code:
+    ```c
+    unsigned int i = 0x00646c72;
+    printf("H%x Wo%s", 57616, &i);
+    ```
+    * The output depends on little-endian encoding. Here's the explanation:
+    * The hexadecimal value 0x00646c72 is little-endian, so it's stored as bytes in memory as 72 6C 64 00.
+    * 57616 in hexadecimal is 0xE110. When formatted as %x, it remains the same.
+    * &i points to the address where the little-endian bytes 72 6C 64 00 are stored.
+    * So, the output will be: Hx Wo�ld
+
+* In the following code, what is going to be printed after 'y='? Why does this happen?
+    ```c
+    printf("x=%d y=%d", 3);
+    ```
+    * In the code provided, the printf function is given two format specifiers (%d) but only one argument (3). This will cause printf to attempt to read two integers (%d placeholders) from the argument list, but there's only one integer (3) provided. This will result in undefined behavior, and the output is unpredictable. The behavior can vary depending on the compiler and system, and it may print garbage values or crash.

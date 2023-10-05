@@ -16,6 +16,18 @@ void kernelvec();
 
 extern int devintr();
 
+
+// // traps
+// int sigalarm(int ticks, void (*handler)()){
+//   // struct proc *p = myproc();
+//   // p->alarm_ticks = ticks;
+//   // p->alarm_handler = handler;
+//   return 0;
+// }
+// int sigreturn(void){
+//   return 0;
+// }
+
 void
 trapinit(void)
 {
@@ -32,7 +44,7 @@ trapinithart(void)
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
-//
+
 void
 usertrap(void)
 {
@@ -77,8 +89,48 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2){
+    // manipulate a process's alarm ticks
+    // handle time interrupt
+    // check and invoke the alarm function if necessary
+    
+    // quote: Only invoke the alarm function if the process has a timer outstanding
+    if(p->alarm_ticks && p->have_return){
+      if (++p->alarm_ticks_passed == 2) {
+        p->trapframe_backup = *p->trapframe;
+        // it will make cpu jmp to the handler function
+        p->trapframe->epc = p->alarm_handler;
+        p->alarm_ticks_passed = 0;
+        // Prevent re-entrant calls to the handler
+        p->have_return = 0;
+      }
+    }
+    // if(p->alarm_ticks != 0){
+    //   // Increment the ticks passed for the current process
+    //   p->alarm_ticks_passed++;
+    //   // check whether the time_passed match the alarm interval
+    //   if(p->alarm_ticks_passed > p->alarm_ticks){
+    //     p->alarm_ticks_passed = 0;
+    //     // check if any function has register in handler
+    //     if(p->alarm_handler != 0){
+    //       // call the handler function, it will bring interruption
+    //       p->trapframe_backup = (struct trapframe*)kalloc();
+    //       // save trapframe to trapframe_backup
+    //       /*
+    //       * memmove is standard c library function that is used to
+    //       * copy a block of memory from a source address to a 
+    //       * destination address
+    //       * 
+    //       * memmove is similar to memcpy, but memove can handle region move with 
+    //       * overlap problem.
+    //       */
+    //       memmove(p->trapframe_backup, p->trapframe, sizeof(struct trapframe));
+    //       p->alarm_handler();
+    //     }
+    //   }
+    // }
     yield();
+  }
 
   usertrapret();
 }

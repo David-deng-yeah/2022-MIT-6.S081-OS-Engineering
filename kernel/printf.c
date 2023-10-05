@@ -59,6 +59,38 @@ printptr(uint64 x)
     consputc(digits[x >> (sizeof(uint64) * 8 - 4)]);
 }
 
+/*
+* backtree() use the frame pointers to walk up the stack and print
+* the saved return address in each stack frame
+*/
+void backtree()
+{
+  printf("backtree:\n");
+  // get current stack frame
+  uint64 fp = r_fp();// get $fp using r_fp() defined in riscv.h
+  while (fp != PGROUNDUP(fp)){// if reach the bottom of stack
+    // read the saved return address from the previous stack frame
+    /*
+    * fp is the frame pointer for current stack frame,
+    * which means it points to the beginning of the
+    * current function's stack frame.
+    * 
+    * since in riscv(an open standard instruction set architecture (ISA))
+    * , the address beginning at frame pointer grows from high to low,
+    * and every unit of address in memory sapce is 64bits(8 bytes, can
+    * be represented by uint64), what's more, in conventionaly, return address
+    * is immediately allocated beneath frame pointer, so we can calculate it
+    * in the format below.
+    */
+    uint64 saved_ra = *(uint64 *)(fp-1*sizeof(uint64));// return address, fp minus 8bytes
+    
+    printf("%p\n", saved_ra);
+    // move to the previous stack frame
+    fp = *(uint64 *)(fp-2*sizeof(uint64));// previous fp
+  }
+}
+
+
 // Print to the console. only understands %d, %x, %p, %s.
 void
 printf(char *fmt, ...)

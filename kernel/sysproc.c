@@ -6,6 +6,47 @@
 #include "spinlock.h"
 #include "proc.h"
 
+/* 
+  * void(*handler)() is a function pointer declaration
+  * void: this indicate that the function doesn't return any value
+  * (*)(): this part specifies that `handler` is a pointer to a function
+  *   1. (): this means that the function can take any number and type of arguments
+  * so, void(*handler)() is a declartion for a function pointer that can point to function
+  * with any arugument list or no argument
+  */
+uint64 
+sys_sigalarm(void)
+{
+  int ticks;
+  uint64 fn;
+  argint(0, &ticks);
+  argaddr(1, &fn);
+  struct proc *p = myproc();
+  p->alarm_ticks = ticks;
+  // p->alarm_handler = (void(*)())(fn);
+  p->alarm_handler = fn;
+  p->have_return = 1;
+  return 0;
+  //return sigalarm(ticks, (void(*)())(fn));
+}
+
+uint64
+sys_sigreturn(void)
+{
+  struct proc *p = myproc();
+  // restore trapframe
+  //memmove(p->trapframe, p->trapframe_backup, sizeof(struct trapframe));
+  *p->trapframe = p->trapframe_backup;
+  // reset the ticks->0
+  //p->alarm_ticks = 0;
+  //p->alarm_ticks_passed = 0;
+  //p->alarm_handler = 0;
+  p->have_return = 1;
+  //return 0;
+  return p->trapframe->a0;
+  //return sigreturn();
+}
+
 uint64
 sys_exit(void)
 {
@@ -67,6 +108,8 @@ sys_sleep(void)
     sleep(&ticks, &tickslock);
   }
   release(&tickslock);
+  // call backtree()
+  backtree();
   return 0;
 }
 
