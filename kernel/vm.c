@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "proc.h"
 
 /*
  * the kernel's page table.
@@ -14,6 +16,12 @@ pagetable_t kernel_pagetable;
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
+
+// this is variable defined in kalloc.c
+#define PA2PGREF_ID(p) (((p) - KERNBASE)/PGSIZE)
+#define PGREF_MAX_ENTRIES PA2PGREF_ID(PHYSTOP)
+extern int PageReferCnt[PGREF_MAX_ENTRIES];
+extern struct spinlock PGREF_lock;
 
 // Make a direct-map page table for the kernel.
 pagetable_t
@@ -148,6 +156,13 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   if(size == 0)
     panic("mappages: size");
   
+  // these two marcos are used to align memory addresses to the nearest page boundaries
+  // for PGROUNDDOWN, it round down the address to the nearest lower multiple
+  // of the pagesize PGSIZE. In other word, it clears the lower bits of the address
+  // to make it align with the start of the page.
+  // It ensures that a points to the start of the page containing VA
+  // and last points to the end of page containing the end of specified
+  // address range
   a = PGROUNDDOWN(va);
   last = PGROUNDDOWN(va + size - 1);
   for(;;){
@@ -308,20 +323,66 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  // char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+      panic("uvmcopy: page not present");\
+
+    // before extract PA from pte, we need to set the PTE_W and PTE_RSW
+    // PTE_RSW: means this page is copy-on-write
+    // but attention! only if the parent process's page-unit is readable can
+    // child process set its page-unit to support copy-on-write.
+    // if not, when parent process's page-unit is no-readable, and child process's
+    // page-unit is set to support copy-on-write, after page-fault interruption, 
+    // the program can write into this page-unit, which is unreasonable.
+    if(*pte & PTE_W){
+      // set the PTE_W to 0
+      *pte &= ~PTE_W;
+      // set he PTE_RSW to 1
+      *pte |= PTE_RSW;
+    }
+    
     pa = PTE2PA(*pte);
+
+    // increment a page's reference count when fork cause a child to share the page
+    // since every fork will call uvmcopy(), so we can directly increse the refCnt 
+    // in vm.c uvmcopy()
+    /*
+    * // Copy user memory from parent to child.
+    * if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+    *   freeproc(np);
+    *   release(&np->lock);
+    *   return -1;
+    * }
+    */
+    acquire(&PGREF_lock);
+    PageReferCnt[pa/PGSIZE] += 1;
+    release(&PGREF_lock);
+
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    // do not need to allocate memory
+    // if((mem = kalloc()) == 0)
+    //   goto err;
+    // memmove(mem, (char*)pa, PGSIZE);
+    // if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
+    //   kfree(mem);
+    //   goto err;
+    // }
+
+    // for every pte in pagetable
+    // map the parent's page into the child's address 
+    // space as read-only
+    // mem: child's pagetable
+    // i: virtual address
+    // PGSIZE: size
+    // pa: pa
+    // flags & ~PTE_W : perm
+    // since mappages.size = PGSIZE, so mappages function
+    // only map one pte's va to pa hh
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags)){
       goto err;
     }
   }
@@ -345,6 +406,11 @@ uvmclear(pagetable_t pagetable, uint64 va)
   *pte &= ~PTE_U;
 }
 
+int checkCowPage(uint64 va, pte_t *pte, struct proc* p){
+  // va should below the size of process memory (bytes)
+  return (va < p->sz) && (*pte & PTE_V) && (*pte & PTE_RSW);
+}
+
 // Copy from kernel to user.
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
@@ -354,18 +420,62 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
   uint64 n, va0, pa0;
 
   while(len > 0){
-    va0 = PGROUNDDOWN(dstva);
-    pa0 = walkaddr(pagetable, va0);
+    va0 = PGROUNDDOWN(dstva);// the beginning VA of the destination page
+    pa0 = walkaddr(pagetable, va0);// the corresponding PA
     if(pa0 == 0)
       return -1;
-    n = PGSIZE - (dstva - va0);
+    
+    // memmove from src to pa0
+    // modify copyout() to use the same scheme as page faults when it encounters a COW page
+    struct proc *p = myproc();
+    pte_t *pte = walk(pagetable, va0, 0);
+    if(*pte == 0)
+      p->killed = 1;
+    if(checkCowPage(va0, pte, p)){
+      char *mem;
+      if((mem = kalloc()) == 0){
+        p->killed = 1;
+      } else {
+        memmove(mem, (char*)pa0, PGSIZE);
+        uint flags = PTE_FLAGS(*pte);\
+        // decrease the reference count of old memory
+        // that va0 point and set pte to 0
+        uvmunmap(pagetable, va0, 1, 1);
+        *pte = (PA2PTE(mem) | flags | PTE_W);
+        *pte &= ~PTE_W;
+        // update pa0 to new PA
+        pa0 = (uint64)mem;
+      }
+    }
+
+
+    // you know, since the va0 is forcely push to the beginning of a new page
+    // it just like:
+    /*
+    *dstva->|                 | 
+    *       |                 |
+    *va0->  +-----------------+
+    *       |                 | 
+    *       |                 | 
+    *       |                 | 
+    *       +-----------------+
+    *       |                 | 
+    *       |                 | 
+    *       |                 | 
+    *       +-----------------+ 
+    */
+    // and in every iteration, we want to copy as many byte as possible in one page-unit
+    // so we have to minus a (dstva - va0)
+    n = PGSIZE - (dstva - va0);// the number of bytes to copy in the current iteration
     if(n > len)
       n = len;
+    // memmove is used to copy n bytes of data from the src buffer to the destination address
+    // in physical memory
     memmove((void *)(pa0 + (dstva - va0)), src, n);
 
     len -= n;
     src += n;
-    dstva = va0 + PGSIZE;
+    dstva = va0 + PGSIZE;// dstva is updated to point the next page-unit
   }
   return 0;
 }

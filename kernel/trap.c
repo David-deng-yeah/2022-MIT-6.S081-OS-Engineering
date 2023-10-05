@@ -29,6 +29,52 @@ trapinithart(void)
   w_stvec((uint64)kernelvec);
 }
 
+/*
+* Recognize page faults in the trap handler.
+* 1. When a write page-fault occurs on a COW page that was originally writeable, 
+*    allocate a new page using `kalloc()`.
+* 2. Copy the contents of the old page to the new page.
+* 3. Modify the relevant PTE in the faulting process to refer to 
+*    the new page with `PTE_W` set. 
+*    This allows the process to write to its own copy of the page.
+* 4. Pages that were originally read-only (not mapped with `PTE_W`, 
+*    like pages in the text segment) should remain read-only 
+*    and shared between parent and child. 
+*    If a process tries to write to such a page, it should be killed.
+*/
+int cowhandler(pagetable_t pagetable, uint64 va){
+  if(va >= MAXVA)
+    return -1;
+
+  pte_t *pte = walk(pagetable, va, 0);
+  if(pte == 0)
+    return -1;
+  // check pte, PTE_U means whether the memory page can be accessed and modified
+  // by user mode
+  if((*pte & PTE_V) == 0 || (*pte & PTE_RSW) == 0 || (*pte & PTE_U) == 0)
+    return -1;
+  // 1. When a write page-fault occurs on a COW page that was originally writeable, 
+  // allocate a new page using `kalloc()`.
+  char *mem;
+  if((mem = kalloc()) == 0)
+    return -1;
+  uint64 pa = PTE2PA(*pte);
+  // 2. Copy the contents of the old page to the new page.
+  memmove((char*)mem, (char*)pa, PGSIZE);
+  // decrease the reference count of old memory page, since a new
+  // page has been allocated
+  kfree((void*)pa);
+
+  // 3. Modify the relevant PTE in the faulting process to refer to 
+  // the new page with `PTE_W` set. 
+  // This allows the process to write to its own copy of the page.
+  uint flags = PTE_FLAGS(*pte);
+  *pte = (PA2PTE(mem) | flags | PTE_W);
+  // set PTE_RSW to 0
+  *pte &= ~PTE_RSW;
+  return 0;
+}
+
 //
 // handle an interrupt, exception, or system call from user space.
 // called from trampoline.S
@@ -65,8 +111,20 @@ usertrap(void)
     intr_on();
 
     syscall();
+  
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if(r_scause() == 15){
+    uint64 va = r_stval();
+    if(va >= p->sz)
+      p->killed = 1;
+    int ret = cowhandler(p->pagetable, va);
+    // Pages that were originally read-only (not mapped with `PTE_W`, 
+    // like pages in the text segment) should remain read-only 
+    // and shared between parent and child. 
+    // If a process tries to write to such a page, it should be killed.
+    if(ret != 0)
+      p->killed = 1;
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());

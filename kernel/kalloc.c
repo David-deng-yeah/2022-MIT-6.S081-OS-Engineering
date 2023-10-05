@@ -23,6 +23,15 @@ struct {
   struct run *freelist;
 } kmem;
 
+// define the reference count of physical memory page
+// from PHYSTOP to KERNBASE, there are 12MB space
+#define PA2PGREF_ID(p) (((p) - KERNBASE)/PGSIZE)
+#define PGREF_MAX_ENTRIES PA2PGREF_ID(PHYSTOP)
+int PageReferCnt[PGREF_MAX_ENTRIES];
+// use to lock PageReferCnt, in case of concurrent manipulate it
+struct spinlock PGREF_lock;
+
+
 void
 kinit()
 {
@@ -51,6 +60,18 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
+  int tmp_ref_cnt = 0;
+  // decrease page reference cnt
+  acquire(&PGREF_lock);
+  PageReferCnt[(uint64)pa/PGSIZE] -= 1;
+  tmp_ref_cnt = PageReferCnt[(uint64)pa/PGSIZE];
+  release(&PGREF_lock);
+  // kfree() should only place a page back on the freelist if its
+  // reference count is 0
+  if(tmp_ref_cnt > 0)
+    return;
+
+
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
@@ -72,8 +93,14 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  // set a page's reference count to 1 when kalloc() allocate it
+  if(r){
     kmem.freelist = r->next;
+    // r is locate between PHYSTOP ~ KERNBASE
+    acquire(&PGREF_lock);
+    PageReferCnt[(uint64)r/PGSIZE] = 1;
+    release(&PGREF_lock);
+  }
   release(&kmem.lock);
 
   if(r)
