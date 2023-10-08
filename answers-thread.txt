@@ -1,0 +1,21 @@
+missing keys can occur due to a race condition in the code:
+
+1. thread A and thread B both call the put function concurrently
+
+2. both threads enter the put function and compute the hash value they want to 
+insert into the hashtable
+
+3. both threads determine that the slot at the computed hash index is empty 
+(as there are no keys with the same hash value there yet)
+
+4. both threads start to insert their keys into the same slot simultaneously. 
+They may overwrite each other's data or cause data corruption 
+since they are not dynvhronized
+
+5. one of the threads successfully inserts its key into the slot, while the other
+threads fails to do so. This results in one of the keys being lost, which is why it
+appears as missing
+
+to avoid missing keys and ensure the correctness of concurrent operations on the 
+hash table, you would need to use synchronization mechanisms, such as mutex locks,
+to protect critical sections of code.

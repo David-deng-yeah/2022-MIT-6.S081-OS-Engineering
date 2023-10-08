@@ -30,7 +30,25 @@ barrier()
   // Block until all threads have called barrier() and
   // then increment bstate.round.
   //
-  
+  // acquire barrier mutex
+  pthread_mutex_lock(&bstate.barrier_mutex);
+  // increase the number of threads have enter the barrier
+  // and judge whether the number is reach the nthread
+  if(++bstate.nthread < nthread) {
+    // atomically releases the barrier_mutex when it goes to sleep
+    // if "++bstate.nthread" and "<" and the sleep & wake up operation
+    // are not be protected by mutex, one scenarios will happend that
+    // thread A is going to sleep, but at that time thread B wake up 
+    // everyone, but then thread A sleep.
+    pthread_cond_wait(&bstate.barrier_cond, &bstate.barrier_mutex);
+  } else {
+    bstate.nthread = 0;
+    bstate.round++;
+    // wake up threads
+    pthread_cond_broadcast(&bstate.barrier_cond);
+  }
+  // release mutex lock
+  pthread_mutex_unlock(&bstate.barrier_mutex);
 }
 
 static void *

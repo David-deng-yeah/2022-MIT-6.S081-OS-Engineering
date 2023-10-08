@@ -17,6 +17,13 @@ struct entry *table[NBUCKET];
 int keys[NKEYS];
 int nthread = 1;
 
+// declare a lock
+pthread_mutex_t lock;
+
+// declare a lock array ()
+// reduce the granularity of locks
+pthread_mutex_t locks[NBUCKET];
+
 
 double
 now()
@@ -41,6 +48,11 @@ void put(int key, int value)
 {
   int i = key % NBUCKET;
 
+  // acquire lock
+  // pthread_mutex_lock(&lock);
+  pthread_mutex_lock(&locks[i]);
+  
+
   // is the key already present?
   struct entry *e = 0;
   for (e = table[i]; e != 0; e = e->next) {
@@ -55,6 +67,10 @@ void put(int key, int value)
     insert(key, value, &table[i], table[i]);
   }
 
+  // release lock
+  // pthread_mutex_unlock(&lock);
+  pthread_mutex_unlock(&locks[i]);
+
 }
 
 static struct entry*
@@ -62,11 +78,19 @@ get(int key)
 {
   int i = key % NBUCKET;
 
+  // acquire lock
+  // pthread_mutex_lock(&lock);
+  pthread_mutex_lock(&locks[i]);
+
 
   struct entry *e = 0;
   for (e = table[i]; e != 0; e = e->next) {
     if (e->key == key) break;
   }
+
+  // release lock
+  // pthread_mutex_unlock(&lock);
+  pthread_mutex_unlock(&locks[i]);
 
   return e;
 }
@@ -104,6 +128,13 @@ main(int argc, char *argv[])
   pthread_t *tha;
   void *value;
   double t1, t0;
+
+  // initialize the lock
+  // pthread_mutex_init(&lock, NULL);
+  for(int i =0; i< NBUCKET; i++){
+    pthread_mutex_init(&locks[i], NULL);
+  }
+
 
 
   if (argc < 2) {

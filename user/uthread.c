@@ -10,14 +10,56 @@
 #define STACK_SIZE  8192
 #define MAX_THREAD  4
 
+/*
+ * 
+ * the kernel scheduler manages the execution of threads of processes in an OS
+ * It triggers context switches either through a timer interrupt(usertrap) or 
+ * when a thread voluntarily give up CPU time (like exit or sleep). 
+ * these switches ultimately
+ * lead to a call to the yield function, follow by performming context switch.
+ * context switch always occur at the boundaries of function calls.
+ * when restoring execution, it's as if returning from a function call, and this
+ * 
+ * 
+*/
 
+// saved registers for kernel context switches
+struct context {
+  uint64 ra; // return address
+  uint64 sp; // stack_pointer
+  // callee saved
+  uint64 s0;
+  uint64 s1;
+  uint64 s2;
+  uint64 s3;
+  uint64 s4;
+  uint64 s5;
+  uint64 s6;
+  uint64 s7;
+  uint64 s8;
+  uint64 s9;
+  uint64 s10;
+  uint64 s11;
+};
+
+/*
+* thread in this file is more like coroutine, since it's completely implement 
+* in user-level, and multiple thread can only run in one CPU, without clock interrupt
+* to force scheduling. The thread itself needs to actively yield to release the CPU at
+* the right time.
+*/
 struct thread {
   char       stack[STACK_SIZE]; /* the thread's stack */
   int        state;             /* FREE, RUNNING, RUNNABLE */
+  // saved register
+  // use uint64_t since it is unsigned integer type with exactly 64 bits
+  // you'd use U64 only when you know the platform on which you're compling
+  // defines it, and how it defines it.
+  struct context ctx;
 };
 struct thread all_thread[MAX_THREAD];
 struct thread *current_thread;
-extern void thread_switch(uint64, uint64);
+extern void thread_switch(struct context* old, struct context* new);
               
 void 
 thread_init(void)
@@ -40,6 +82,7 @@ thread_schedule(void)
   next_thread = 0;
   t = current_thread + 1;
   for(int i = 0; i < MAX_THREAD; i++){
+    // find all thread util a thread is runnable
     if(t >= all_thread + MAX_THREAD)
       t = all_thread;
     if(t->state == RUNNABLE) {
@@ -62,6 +105,8 @@ thread_schedule(void)
      * Invoke thread_switch to switch from t to next_thread:
      * thread_switch(??, ??);
      */
+    thread_switch(&t->ctx, &next_thread->ctx);
+
   } else
     next_thread = 0;
 }
@@ -76,6 +121,11 @@ thread_create(void (*func)())
   }
   t->state = RUNNABLE;
   // YOUR CODE HERE
+  // setting the return address -> func()
+  t->ctx.ra = (uint64)func;
+  // setting sp so that the thread has its own stack
+  t->ctx.sp = (uint64)(t->stack + STACK_SIZE);
+  
 }
 
 void 
