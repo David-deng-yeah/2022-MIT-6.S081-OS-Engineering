@@ -172,6 +172,8 @@ net_tx_eth(struct mbuf *m, uint16 ethtype)
   // to broadcast instead.
   memmove(ethhdr->dhost, broadcast_mac, ETHADDR_LEN);
   ethhdr->type = htons(ethtype);
+  // when the network stack needs to send a packet, it calls
+  // e1000_transmit() with an mbuf that holds the packet to be sent.
   if (e1000_transmit(m)) {
     mbuffree(m);
   }
