@@ -1,30 +1,24 @@
 # SysCall
-done
 1. Add Trace System Call in User Space:
     * In the user-level code, add a new system call named trace in the user/trace.c file. (wrong, nothing need to do)
     * This system call should take an integer mask as an argument, which will specify which system calls to trace.
 
-done
 2. Define the Trace System Call in Kernel Space:
     * Add a prototype for the trace system call in user/user.h.
     * Define a syscall number for trace in kernel/syscall.h.
     * Create a system call stub for trace in user/usys.pl to map the system call to its number.
 
-done
 3. Implement sys_trace in kernel/sysproc.c:
     * Implement the sys_trace function in kernel/sysproc.c. This function should store the mask argument in the proc structure to enable tracing for the current process and its children.
 
-done
 4. Modify fork to Copy Trace Mask:
     * In the fork function in kernel/proc.c, add code to copy the trace mask from the parent process to the child process when a new process is created using fork.
 
-done
 5. Modify syscall in kernel/syscall.c:
     * Modify the syscall function in kernel/syscall.c to print trace output before each system call returns if the corresponding bit is set in the trace mask.
     * You will need to create an array of syscall names to index into when printing the trace output. You can define this array in the same file.
     * The trace output should include the process ID, the name of the system call, and the return value.
 
-done
 6. Compile and Test:
     * Make sure to add $U/_trace to UPROGS in the Makefile to compile the trace program.
     * Compile your modified xv6 kernel.
