@@ -105,48 +105,94 @@ void kfree_cpu(void *pa, int cpu){
 // Allocate one 4096-byte page of physical memory.
 // Returns a pointer that the kernel can use.
 // Returns 0 if the memory cannot be allocated.
-void *
-kalloc(void)
-{
+
+/*kallock V2.0*/
+void* kalloc(){
   struct run *r;
 
-  // acquire(&kmem.lock);
-  // r = kmem.freelist;
-  // if(r)
-  //   kmem.freelist = r->next;
-  // release(&kmem.lock);
-
-  push_off();
+  push_off();// turn off interrupt
   int cpu = cpuid();
-  pop_off();
-  
   acquire(&kmem[cpu].lock);
-  r = kmem[cpu].freelist;
-  if(r){
-    kmem[cpu].freelist = r->next;
-    release(&kmem[cpu].lock);
-  } else {// steal
-    // we can't try to acquire another cpu free list lock
-    // without releasing the current cpu freelist lock,
-    // which is a classic deadlock situation caused by a 
-    // staggered locking sequence.
-    release(&kmem[cpu].lock);
-    // current cpu's freelist is NULL, let's probe others cpu's
+  if(!kmem[cpu].freelist){// if current cpu's freelist is NULL
+    int steal_pages_num = 64;// decide arbitrarily
     for(int i=0; i<NCPU; i++){
       if(i == cpu)
         continue;
       acquire(&kmem[i].lock);
-      r = kmem[i].freelist;
-      if(r){
-        kmem[i].freelist = r->next;
-        release(&kmem[i].lock); 
-        break;
+      struct run *tmp_R = kmem[i].freelist;
+      while(tmp_R && steal_pages_num){
+        kmem[i].freelist = tmp_R->next;
+        tmp_R->next = kmem[cpu].freelist;
+        kmem[cpu].freelist = tmp_R;
+        tmp_R = kmem[i].freelist;
+        steal_pages_num--;
       }
       release(&kmem[i].lock);
+      if(steal_pages_num == 0)break;// done stealing
     }
   }
+  // after stealling
+  r = kmem[cpu].freelist;
+  if(r){
+    kmem[cpu].freelist->next = r->next;
+  }
+  release(&kmem[cpu].lock);
+  pop_off();// restore interrupt
 
-  if(r)
-    memset((char*)r, 5, PGSIZE); // fill with junk
+  if(r){
+    memset((char*)r, 5, PGSIZE);
+  }
   return (void*)r;
 }
+
+/*kalloc v1.0*/
+/*
+* when current cpu's freelist is NULL, it will let other cpu allocate mem
+* but after that this cpu's freelist is still NULL, so "stealing" will happend often
+* that is not effective
+*/
+// void *
+// kalloc(void)
+// {
+//   struct run *r;
+
+//   // acquire(&kmem.lock);
+//   // r = kmem.freelist;
+//   // if(r)
+//   //   kmem.freelist = r->next;
+//   // release(&kmem.lock);
+
+//   push_off();
+//   int cpu = cpuid();
+//   pop_off();
+  
+//   acquire(&kmem[cpu].lock);
+//   r = kmem[cpu].freelist;
+//   if(r){
+//     kmem[cpu].freelist = r->next;
+//     release(&kmem[cpu].lock);
+//   } else {// steal
+//     // we can't try to acquire another cpu free list lock
+//     // without releasing the current cpu freelist lock,
+//     // which is a classic deadlock situation caused by a 
+//     // staggered locking sequence.
+//     release(&kmem[cpu].lock);
+//     // current cpu's freelist is NULL, let's probe others cpu's
+//     for(int i=0; i<NCPU; i++){
+//       if(i == cpu)
+//         continue;
+//       acquire(&kmem[i].lock);
+//       r = kmem[i].freelist;
+//       if(r){
+//         kmem[i].freelist = r->next;
+//         release(&kmem[i].lock); 
+//         break;
+//       }
+//       release(&kmem[i].lock);
+//     }
+//   }
+
+//   if(r)
+//     memset((char*)r, 5, PGSIZE); // fill with junk
+//   return (void*)r;
+// }
