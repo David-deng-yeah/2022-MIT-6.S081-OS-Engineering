@@ -79,7 +79,30 @@ struct trapframe {
   /* 280 */ uint64 t6;
 };
 
+/*
+* define a structure corresponding to the VMA(virtual memory area)
+* since xv6 kernel doesn't have a memory allocator in the kernel,
+* it's OK to declare a fixed-size array VMAs and allocate from that
+* array as need.
+* A size of 16 should be sufficient
+*/
+#define NVMA 16
+struct vma {
+  int used;
+
+  uint64 addr; // start va address of the current vma
+  uint len; // vma length
+  // vma should contian a pointer to a `struct file` for the file being mapped
+  struct file *f;
+  // ..
+  uint offset; // map starts at offset in the file
+  uint flags; // whether updates are carried through to the underlying file
+  uint prot;  // memory protection of the mapping
+};
+
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
+
+
 
 // Per-process state
 struct proc {
@@ -104,4 +127,7 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  // vma
+  struct vma vma[NVMA];
 };

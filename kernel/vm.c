@@ -5,6 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "proc.h"
+#include "file.h"
 
 /*
  * the kernel's page table.
@@ -14,6 +16,85 @@ pagetable_t kernel_pagetable;
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
+
+#define PROT_NONE       0x0
+#define PROT_READ       0x1
+#define PROT_WRITE      0x2
+#define PROT_EXEC       0x4
+
+#define MAP_SHARED      0x01
+#define MAP_PRIVATE     0x02
+
+
+// mmap_handler  
+// allocate a page of physical address, read 4096 bytes of relevant file into that page
+// and map it into the user address space.
+// use readi to read the file. (readi takes an offset argument at which to read in file,
+// but we need to lock/unlock the inode passed to readi)
+// setting the permissions correctly on the page
+
+// handle page fault caused by mmaped va,
+// return 0 on success, -1 on failure, -2 on invalid va
+int mmap_handler(uint64 va, int scause){// va is where page fault happend
+  struct proc *p = myproc();
+  int vma_index = -1;
+  if(va >= MAXVA){
+    printf("va cannot be greater than MAXVA: %p\n", va);
+    return -2;
+  }
+  // scan the vma list to match va
+  for(int i=0; i<NVMA; i++){
+    struct vma* vma = &p->vma[i];
+    if(vma->used == 1 && va >= vma->addr && va < vma->addr + PGROUNDUP(vma->len)){
+      vma_index = i;
+      break;
+    }
+  }
+  if(vma_index == -1){
+    return -2; // vma not found
+  }
+  struct vma *v = &p->vma[vma_index];
+  // check permission bits
+  if(scause == 13 && !(v->prot & PROT_READ)) {
+    printf("mmap_handler: cannot read from unreadable vma\n");
+    return -1;// can not read from unreadable vma
+  }
+  if(scause == 15 && !(v->prot & PROT_WRITE)) {
+    printf("mmap_handler: cannot write to unwriteable vam\n");
+    return -1;// cannot write to unwriteable vma
+  }
+
+  // allocate physical page
+  va = PGROUNDDOWN(va);
+  void *pa = kalloc();
+  if(pa == 0){
+    panic("mmap_handler: kalloc failed\n");
+  }
+  memset(pa, 0, PGSIZE);
+  // load page from file
+  begin_op();
+  ilock(v->f->ip);
+  readi(v->f->ip, 0, (uint64)pa, v->offset + PGROUNDDOWN(va - v->addr), PGSIZE);
+  iunlock(v->f->ip);
+  end_op();
+  // map the page to user space
+  int perm = PTE_U;
+  if(v->prot & PROT_READ){
+    perm |= PTE_R;
+  }
+  if(v->prot & PROT_WRITE){
+    perm |= PTE_W;
+  }
+  if(v->prot & PROT_EXEC){
+    perm |= PTE_X;
+  }
+  if(mappages(p->pagetable, va, PGSIZE, (uint64)pa, perm) < 0){
+    printf("mmap_handler: failed to map page to user space. va: %p, pa: %p\n", va, pa);
+    kfree(pa);
+    return -1; // Failed to map page to user space
+  }
+  return 0;
+}
 
 // Make a direct-map page table for the kernel.
 pagetable_t
@@ -167,6 +248,9 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
 // Remove npages of mappings starting from va. va must be
 // page-aligned. The mappings must exist.
 // Optionally free the physical memory.
+// Remove npages of mappings starting from va. va must be
+// page-aligned. The mappings must exist.
+// Optionally free the physical memory.
 void
 uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 {
@@ -180,7 +264,8 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     if((pte = walk(pagetable, a, 0)) == 0)
       panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
+      // panic("uvmunmap: not mapped");
+      continue;
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -190,6 +275,29 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
     *pte = 0;
   }
 }
+// void
+// uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
+// {
+//   uint64 a;
+//   pte_t *pte;
+
+//   if((va % PGSIZE) != 0)
+//     panic("uvmunmap: not aligned");
+
+//   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+//     if((pte = walk(pagetable, a, 0)) == 0)
+//       panic("uvmunmap: walk");
+//     if((*pte & PTE_V) == 0)
+//       panic("uvmunmap: not mapped");
+//     if(PTE_FLAGS(*pte) == PTE_V)
+//       panic("uvmunmap: not a leaf");
+//     if(do_free){
+//       uint64 pa = PTE2PA(*pte);
+//       kfree((void*)pa);
+//     }
+//     *pte = 0;
+//   }
+// }
 
 // create an empty user page table.
 // returns 0 if out of memory.

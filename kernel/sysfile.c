@@ -15,6 +15,159 @@
 #include "sleeplock.h"
 #include "file.h"
 #include "fcntl.h"
+#include "memlayout.h"
+
+// sys_mmap()
+// find an unused region in the process's address space in which to map the file
+// and add a VMA to the process's table of mapped regions.
+// mmap should increase the file's reference count so that the structure doesn't disapper
+
+/*
+* implement the mmap system call. See `man mmap` for the prototype of this function
+* , which finds the empty slots avaliable in the 16 VMA slots of the process and 
+* calculates the lowest virtual address used in all the VMA's (as the end address
+* of the new VMA, vaend, an open interval) and maps the current file to the location
+* below that lowest address(vastart = vaend - sz)
+*/
+// finally remember to use filedup(v->f), which increase file's reference with 1
+uint64 sys_mmap(void){
+  /*
+  * void *mmap(void *addr, size_t length, int prot, int flags,int fd, off_t offset);
+  */
+  uint64 addr;
+  int length, prot, flags, fd, offset;
+
+  struct proc *p = myproc();
+
+  //fetch argument from user space
+  argaddr(0, &addr);
+  argint(1, &length);
+  argint(2, &prot);
+  argint(3, &flags);
+  argint(4, &fd);
+  argint(5, &offset);
+
+  if(addr != 0)
+    panic("sys_mmap: addr not set 0");
+  if(offset != 0)
+    panic("sys_mmap: offset not set 0");
+
+  // check if file's prot bits match flags and file permission
+  // you can't write back any changes to a unwritable file
+  struct file *f = p->ofile[fd];// process's open file
+  if(!(f->writable) && (flags & MAP_SHARED) && (prot & PROT_WRITE)){
+    printf("sys_mmap: cannot write back any changes to a unwriteable file.\n");
+    return -1;
+  }
+  if(!(f->readable) && (prot & PROT_READ)){
+    printf("sys_mmap: cannot read from a unreadble file.\n");
+    return -1;
+  }
+
+  // find free VMA, and calculate where to put mmap-ed user memory
+  // mmap-ed memory grows top-down from trapframe page
+  /*
+  * +---------------
+  * | trampoline   |
+  * +---------------
+  * | trapframe    |
+  * +---------------
+  * |              |
+  * | mapped page 1|
+  * | mapped page 2|  growing from high to low
+  * |    ...       |
+  * +---------------
+  * | stack        |
+  * +---------------
+  * | data         |
+  * +---------------
+  * | text         |
+  * +---------------
+  */
+  struct vma *vma = 0;
+  uint64 min_mmap_addr = MIN_MMAP;// lowest address
+  for(int i=0; i<NVMA; i++){
+    struct vma *vv = &p->vma[i];// vma slots
+    // if we find an unused slot and the vma is still null
+    // we assign the address of the unused slot to vma
+    if(!vv->used){
+      if(!vma){
+        vma = vv;
+        vv->used = 1;
+      }
+    } else if(vv->addr < min_mmap_addr){
+      // otherwise, if it finds a used slot with an addr less than
+      // the current min_mmap_addr, it updates the min_mmap_addr to that value
+      min_mmap_addr = PGROUNDDOWN(vv->addr);
+    }
+  }
+  if(!vma){
+    printf("sys+map: unable to find free VMA\n");
+    return -1;
+  }
+  // fill in state info into vma
+  vma->len = length;
+  vma->prot = prot;
+  vma->flags = flags;
+  vma->f = filedup(f); // increase teh file's reference count
+  vma->offset = offset;
+  vma->addr = min_mmap_addr;
+  return vma->addr;
+}
+
+uint64 sys_munmap(void) {
+  uint64 addr;
+  int length;
+  int vma_index = -1;
+  struct proc *p = myproc();
+
+  // Fetch arguments from user space
+  argaddr(0, &addr);
+  argint(1, &length);
+
+  // Scan the VMA list to match va
+  for (int i = 0; i < NVMA; i++){
+    struct vma* vma = &p->vma[i];
+    if(vma->used == 1 && addr >= vma->addr 
+    && addr < vma->addr + vma->len){
+      vma_index = i;
+      break;
+    }
+  }
+  if(vma_index == -1){
+    printf("sys_munmap: VMA not found.\n");
+    return -1; // VMA not found
+  }
+  struct vma *v = &p->vma[vma_index];
+
+  // Check munmap range
+  if(addr != v->addr && addr + length != v->addr + v->len){
+    printf("sys_munmap: mmap range does not match VMA."
+    "va: %p, len: %d\n", addr, length);
+    return -1;
+  }
+  if(addr == v->addr){
+    v->addr += length;
+    v->len -= length;
+  } else if(addr + length == v->addr + v->len){
+    v->len -= length;
+  }
+
+  // Write back to file if configured
+  if(v->flags == MAP_SHARED && (v->prot & PROT_WRITE)){
+    filewrite(v->f, addr, length);
+  }
+  // Remove mappings
+  uvmunmap(p->pagetable, addr, PGROUNDUP(length) / PGSIZE, 1);
+
+  // Close the file if the all mappings are removed in the VMA
+  if(v->len == 0){
+    fileclose(v->f);
+    v->used = 0;
+  }
+
+  return 0;
+}
 
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
