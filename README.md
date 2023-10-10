@@ -40,7 +40,7 @@
 
 ### lab-8 Lock
 
-to be continue
+[Lock](https://github.com/David-deng-yeah/2022-MIT-6.S081-OS-Engineering/tree/lock)
 
 ### lab-9 File system
 
@@ -48,4 +48,4 @@ to be continue
 
 ### lab-10 mmap
 
-to be continue
+[mmap](https://github.com/David-deng-yeah/2022-MIT-6.S081-OS-Engineering/tree/mmap)
